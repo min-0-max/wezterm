@@ -1,6 +1,6 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 //! Model a cell in the terminal display
-use crate::color::{ColorAttribute, PaletteIndex};
+use crate::color::{ColorAttribute, PaletteIndex, SrgbaTuple};
 #[cfg(feature = "use_image")]
 use crate::image::ImageCell;
 use alloc::sync::Arc;
@@ -24,11 +24,26 @@ pub mod color;
 #[cfg(feature = "use_image")]
 pub mod image;
 
+/// A cell's color, stored by value.
+///
+/// This holds every case `ColorAttribute` can express, so a color never needs the heap.
+/// It used to hold only the default and palette cases, and a true color spilled into the
+/// heap-allocated `FatAttributes`. That made true color -- what any 24-bit-color TUI emits
+/// for every cell it paints -- the expensive case: the pen allocated when the color was set,
+/// every cell written with that pen cloned the allocation, and every cell overwritten freed
+/// one. A screenful of true color cost a malloc and a free per cell.
+///
+/// Widening this by 16 bytes (an `SrgbaTuple`) buys that back: `CellAttributes` grows, but a
+/// true color cell no longer carries a heap allocation of its own, so it gets cheaper in both
+/// time and memory. `FatAttributes` is still there for what is genuinely rare -- hyperlinks,
+/// images, underline color.
 #[cfg_attr(feature = "use_serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 enum SmallColor {
     Default,
     PaletteIndex(PaletteIndex),
+    TrueColorWithDefaultFallback(SrgbaTuple),
+    TrueColorWithPaletteFallback(SrgbaTuple, PaletteIndex),
 }
 
 impl Default for SmallColor {
@@ -42,6 +57,27 @@ impl Into<ColorAttribute> for SmallColor {
         match self {
             Self::Default => ColorAttribute::Default,
             Self::PaletteIndex(idx) => ColorAttribute::PaletteIndex(idx),
+            Self::TrueColorWithDefaultFallback(c) => {
+                ColorAttribute::TrueColorWithDefaultFallback(c)
+            }
+            Self::TrueColorWithPaletteFallback(c, idx) => {
+                ColorAttribute::TrueColorWithPaletteFallback(c, idx)
+            }
+        }
+    }
+}
+
+impl From<ColorAttribute> for SmallColor {
+    fn from(color: ColorAttribute) -> Self {
+        match color {
+            ColorAttribute::Default => Self::Default,
+            ColorAttribute::PaletteIndex(idx) => Self::PaletteIndex(idx),
+            ColorAttribute::TrueColorWithDefaultFallback(c) => {
+                Self::TrueColorWithDefaultFallback(c)
+            }
+            ColorAttribute::TrueColorWithPaletteFallback(c, idx) => {
+                Self::TrueColorWithPaletteFallback(c, idx)
+            }
         }
     }
 }
@@ -97,8 +133,6 @@ struct FatAttributes {
     /// The color of the underline.  If None, then
     /// the foreground color is to be used
     underline_color: ColorAttribute,
-    foreground: ColorAttribute,
-    background: ColorAttribute,
 }
 
 impl FatAttributes {
@@ -111,8 +145,6 @@ impl FatAttributes {
             cell.compute_shape_hash(hasher);
         }
         self.underline_color.hash(hasher);
-        self.foreground.hash(hasher);
-        self.background.hash(hasher);
     }
 }
 
@@ -238,74 +270,20 @@ impl CellAttributes {
 
     /// Set the foreground color for the cell to that specified
     pub fn set_foreground<C: Into<ColorAttribute>>(&mut self, foreground: C) -> &mut Self {
-        let foreground: ColorAttribute = foreground.into();
-        match foreground {
-            ColorAttribute::Default => {
-                self.foreground = SmallColor::Default;
-                if let Some(fat) = self.fat.as_mut() {
-                    fat.foreground = ColorAttribute::Default;
-                }
-                self.deallocate_fat_attributes_if_none();
-            }
-            ColorAttribute::PaletteIndex(idx) => {
-                self.foreground = SmallColor::PaletteIndex(idx);
-                if let Some(fat) = self.fat.as_mut() {
-                    fat.foreground = ColorAttribute::Default;
-                }
-                self.deallocate_fat_attributes_if_none();
-            }
-            foreground => {
-                self.foreground = SmallColor::Default;
-                self.allocate_fat_attributes();
-                self.fat.as_mut().unwrap().foreground = foreground;
-            }
-        }
-
+        self.foreground = foreground.into().into();
         self
     }
 
     pub fn foreground(&self) -> ColorAttribute {
-        if let Some(fat) = self.fat.as_ref() {
-            if fat.foreground != ColorAttribute::Default {
-                return fat.foreground;
-            }
-        }
         self.foreground.into()
     }
 
     pub fn set_background<C: Into<ColorAttribute>>(&mut self, background: C) -> &mut Self {
-        let background: ColorAttribute = background.into();
-        match background {
-            ColorAttribute::Default => {
-                self.background = SmallColor::Default;
-                if let Some(fat) = self.fat.as_mut() {
-                    fat.background = ColorAttribute::Default;
-                }
-                self.deallocate_fat_attributes_if_none();
-            }
-            ColorAttribute::PaletteIndex(idx) => {
-                self.background = SmallColor::PaletteIndex(idx);
-                if let Some(fat) = self.fat.as_mut() {
-                    fat.background = ColorAttribute::Default;
-                }
-                self.deallocate_fat_attributes_if_none();
-            }
-            background => {
-                self.background = SmallColor::Default;
-                self.allocate_fat_attributes();
-                self.fat.as_mut().unwrap().background = background;
-            }
-        }
-
+        self.background = background.into().into();
         self
     }
 
     pub fn background(&self) -> ColorAttribute {
-        if let Some(fat) = self.fat.as_ref() {
-            if fat.background != ColorAttribute::Default {
-                return fat.background;
-            }
-        }
         self.background.into()
     }
 
@@ -321,8 +299,6 @@ impl CellAttributes {
                 #[cfg(feature = "use_image")]
                 image: vec![],
                 underline_color: ColorAttribute::Default,
-                foreground: ColorAttribute::Default,
-                background: ColorAttribute::Default,
             }));
         }
     }
@@ -338,10 +314,7 @@ impl CellAttributes {
                         return false;
                     }
                 }
-                fat.hyperlink.is_none()
-                    && fat.underline_color == ColorAttribute::Default
-                    && fat.foreground == ColorAttribute::Default
-                    && fat.background == ColorAttribute::Default
+                fat.hyperlink.is_none() && fat.underline_color == ColorAttribute::Default
             })
             .unwrap_or(false);
         if deallocate {
@@ -422,22 +395,14 @@ impl CellAttributes {
     /// Clone the attributes, but exclude fancy extras such
     /// as hyperlinks or future sprite things
     pub fn clone_sgr_only(&self) -> Self {
+        // The colors are carried by value, so copying the fields carries them; there is
+        // nothing on the heap left to chase.
         let mut res = Self {
             attributes: self.attributes,
             foreground: self.foreground,
             background: self.background,
             fat: None,
         };
-        if let Some(fat) = self.fat.as_ref() {
-            if fat.background != ColorAttribute::Default
-                || fat.foreground != ColorAttribute::Default
-            {
-                res.allocate_fat_attributes();
-                let new_fat = res.fat.as_mut().unwrap();
-                new_fat.foreground = fat.foreground;
-                new_fat.background = fat.background;
-            }
-        }
         // Reset the semantic type; clone_sgr_only is used primarily
         // to create a "blank" cell when clearing and we want that to
         // be deterministically tagged as Output so that we have an

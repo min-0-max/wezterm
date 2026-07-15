@@ -142,6 +142,23 @@ pub trait TerminalConfiguration: Downcast + std::fmt::Debug + Send + Sync {
         0
     }
 
+    /// Whether writes to the writer are handed to a background thread.
+    ///
+    /// The default is true, which is what an interactive terminal wants: the writer is the
+    /// pty, a write to it can block when the child is not reading, and blocking the thread
+    /// that is draining the child's output would deadlock a large paste.
+    ///
+    /// An embedding whose writer cannot block -- a headless terminal that captures
+    /// answerbacks into memory rather than sending them anywhere -- pays for that safety
+    /// without needing it: a thread per terminal, an allocation and a channel send per
+    /// write, and, because delivery is then asynchronous, no way to read back what a given
+    /// chunk of input answered without synchronizing with that thread. Such an embedding
+    /// can return false and have its writer called directly, on the thread that fed the
+    /// bytes.
+    fn threaded_writer(&self) -> bool {
+        true
+    }
+
     /// Returns the size of the scrollback in terms of the number of rows.
     fn scrollback_size(&self) -> usize {
         3500

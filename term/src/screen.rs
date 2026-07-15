@@ -325,6 +325,16 @@ impl Screen {
         }
     }
 
+    /// Get a reference to a line, relative to start of scrollback.
+    ///
+    /// The counterpart to `line_mut`, for readers that only need to look. `lines_in_phys_range`
+    /// answers the same question by cloning, which costs an allocation per line; a reader
+    /// walking the whole scrollback pays that per row for lines it never mutates.
+    #[inline]
+    pub fn line(&self, idx: PhysRowIndex) -> &Line {
+        &self.lines[idx]
+    }
+
     /// Get mutable reference to a line, relative to start of scrollback.
     #[inline]
     pub fn line_mut(&mut self, idx: PhysRowIndex) -> &mut Line {

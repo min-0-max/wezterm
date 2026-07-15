@@ -353,7 +353,7 @@ pub struct TerminalState {
     term_program: String,
     term_version: String,
 
-    writer: BufWriter<ThreadedWriter>,
+    writer: Box<dyn std::io::Write + Send>,
 
     image_cache: lru::LruCache<[u8; 32], Arc<ImageData>>,
     sixel_scrolls_right: bool,
@@ -504,7 +504,11 @@ impl TerminalState {
         term_version: &str,
         writer: Box<dyn std::io::Write + Send>,
     ) -> TerminalState {
-        let writer = BufWriter::new(ThreadedWriter::new(writer));
+        let writer: Box<dyn std::io::Write + Send> = if config.threaded_writer() {
+            Box::new(BufWriter::new(ThreadedWriter::new(writer)))
+        } else {
+            writer
+        };
         let seqno = 1;
         let screen = ScreenOrAlt::new(size, &config, seqno, config.bidi_mode());
 

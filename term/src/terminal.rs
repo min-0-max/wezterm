@@ -162,13 +162,34 @@ impl Terminal {
     /// characters; it is valid to feed in chunks of data as they arrive.
     /// The output is parsed and applied to the terminal model.
     pub fn advance_bytes<B: AsRef<[u8]>>(&mut self, bytes: B) {
+        self.advance_bytes_observed(bytes, |_| {});
+    }
+
+    /// Feed the terminal parser a slice of bytes, showing each parsed action to
+    /// `observer` immediately before it is applied to the terminal model.
+    ///
+    /// This is `advance_bytes` with a tap on the action stream, for embeddings that
+    /// need to watch what the parser produced -- recording it, logging it, or tracking
+    /// state the terminal model does not expose through a getter. The alternative is to
+    /// run a second parser over the same bytes, or to collect the actions into a `Vec`
+    /// and hand that to `perform_actions`; the first parses everything twice and the
+    /// second buffers the whole stream before any of it is applied. The observer sees
+    /// exactly the actions this terminal applies, in order, as they are applied.
+    pub fn advance_bytes_observed<B: AsRef<[u8]>, F: FnMut(&wezterm_escape_parser::Action)>(
+        &mut self,
+        bytes: B,
+        mut observer: F,
+    ) {
         self.state.increment_seqno();
         {
             let bytes = bytes.as_ref();
 
             let mut performer = Performer::new(&mut self.state);
 
-            self.parser.parse(bytes, |action| performer.perform(action));
+            self.parser.parse(bytes, |action| {
+                observer(&action);
+                performer.perform(action);
+            });
         }
         self.trigger_unseen_output_notif();
     }

@@ -194,6 +194,24 @@ impl<'a> Performer<'a> {
                 self.new_line(true);
             }
 
+            // A double-width grapheme occupies two adjacent cells and cannot be split
+            // by the right margin, so "doesn't fit" means fewer columns remain than the
+            // grapheme is wide, not just that the cursor is past the margin. When
+            // DECAWM is enabled such a grapheme moves to the next line, and the single
+            // column it could not use is left blank.
+            if self.dec_auto_wrap
+                && print_width > 1
+                && self.cursor.x + print_width > self.left_and_right_margins.end
+            {
+                let y = self.cursor.y;
+                let screen = self.screen_mut();
+                let phys_y = screen.phys_row(y);
+                screen
+                    .line_mut(phys_y)
+                    .set_last_cell_was_wrapped(true, seqno);
+                self.new_line(true);
+            }
+
             let x = self.cursor.x;
             let y = self.cursor.y;
             let width = self.left_and_right_margins.end;
