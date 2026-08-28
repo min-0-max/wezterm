@@ -42,6 +42,25 @@ lazy_static::lazy_static! {
     };
 }
 
+fn cursor_shape_with_blink(shape: CursorShape, blinking: bool) -> CursorShape {
+    match (shape, blinking) {
+        (CursorShape::Default | CursorShape::BlinkingBlock | CursorShape::SteadyBlock, true) => {
+            CursorShape::BlinkingBlock
+        }
+        (CursorShape::Default | CursorShape::BlinkingBlock | CursorShape::SteadyBlock, false) => {
+            CursorShape::SteadyBlock
+        }
+        (CursorShape::BlinkingUnderline | CursorShape::SteadyUnderline, true) => {
+            CursorShape::BlinkingUnderline
+        }
+        (CursorShape::BlinkingUnderline | CursorShape::SteadyUnderline, false) => {
+            CursorShape::SteadyUnderline
+        }
+        (CursorShape::BlinkingBar | CursorShape::SteadyBar, true) => CursorShape::BlinkingBar,
+        (CursorShape::BlinkingBar | CursorShape::SteadyBar, false) => CursorShape::SteadyBar,
+    }
+}
+
 pub(crate) struct TabStop {
     tabs: Vec<bool>,
     tab_width: usize,
@@ -1437,14 +1456,18 @@ impl TerminalState {
         match mode {
             Mode::SetDecPrivateMode(DecPrivateMode::Code(
                 DecPrivateModeCode::StartBlinkingCursor,
-            ))
-            | Mode::ResetDecPrivateMode(DecPrivateMode::Code(
+            )) => {
+                self.cursor.shape = cursor_shape_with_blink(self.cursor.shape, true);
+            }
+            Mode::ResetDecPrivateMode(DecPrivateMode::Code(
                 DecPrivateModeCode::StartBlinkingCursor,
-            )) => {}
+            )) => {
+                self.cursor.shape = cursor_shape_with_blink(self.cursor.shape, false);
+            }
             Mode::QueryDecPrivateMode(DecPrivateMode::Code(
                 DecPrivateModeCode::StartBlinkingCursor,
             )) => {
-                self.decqrm_response(mode, true, false);
+                self.decqrm_response(mode, true, self.cursor.shape.is_blinking());
             }
 
             Mode::SetDecPrivateMode(DecPrivateMode::Code(DecPrivateModeCode::AutoRepeat))
