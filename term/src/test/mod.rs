@@ -8,7 +8,7 @@ mod c1;
 mod csi;
 mod image;
 // mod selection; FIXME: port to render layer
-use crate::color::ColorPalette;
+use crate::color::{ColorPalette, RgbColor};
 use k9::assert_equal as assert_eq;
 use std::sync::{Arc, Mutex};
 use wezterm_escape_parser::csi::{Edit, EraseInDisplay, EraseInLine};
@@ -187,6 +187,44 @@ impl TestTerm {
             reason, seqno, seqs
         );
     }
+}
+
+#[test]
+fn osc_color_overrides_preserve_explicit_presence_and_reset() {
+    let mut term = TestTerm::new(2, 4, 8);
+    term.print("\x1b]4;1;#cc5555\x1b\\");
+    term.print("\x1b]10;#b2b2b2\x1b\\");
+    term.print("\x1b]11;#223344\x1b\\");
+    term.print("\x1b]12;#654321\x1b\\");
+
+    let colors = term.color_overrides();
+    assert_eq!(
+        colors.colors[1],
+        Some(RgbColor::new_8bpc(0xcc, 0x55, 0x55).into())
+    );
+    assert_eq!(
+        colors.foreground,
+        Some(RgbColor::new_8bpc(0xb2, 0xb2, 0xb2).into())
+    );
+    assert_eq!(
+        colors.background,
+        Some(RgbColor::new_8bpc(0x22, 0x33, 0x44).into())
+    );
+    assert_eq!(
+        colors.cursor,
+        Some(RgbColor::new_8bpc(0x65, 0x43, 0x21).into())
+    );
+
+    term.print("\x1b]104;1\x1b\\");
+    term.print("\x1b]110\x1b\\");
+    term.print("\x1b]111\x1b\\");
+    term.print("\x1b]112\x1b\\");
+    let reset = term.color_overrides();
+    assert_eq!(reset.colors[1], None);
+    assert_eq!(
+        (reset.foreground, reset.background, reset.cursor),
+        (None, None, None)
+    );
 }
 
 impl Deref for TestTerm {

@@ -58,6 +58,25 @@ pub struct ColorPalette {
     pub split: SrgbaTuple,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct ColorOverrides {
+    pub colors: [Option<SrgbaTuple>; 256],
+    pub foreground: Option<SrgbaTuple>,
+    pub background: Option<SrgbaTuple>,
+    pub cursor: Option<SrgbaTuple>,
+}
+
+impl Default for ColorOverrides {
+    fn default() -> Self {
+        Self {
+            colors: [None; 256],
+            foreground: None,
+            background: None,
+            cursor: None,
+        }
+    }
+}
+
 impl fmt::Debug for Palette256 {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         // If we wanted to dump all of the entries, we'd use this:

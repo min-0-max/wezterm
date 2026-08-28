@@ -690,6 +690,10 @@ impl TerminalState {
             .unwrap_or_else(|| self.config.color_palette())
     }
 
+    pub fn color_overrides(&self) -> crate::color::ColorOverrides {
+        crate::color::ColorOverrides::default()
+    }
+
     /// Called in response to dynamic color scheme escape sequences.
     /// Will make a copy of the palette from the config file if this
     /// is the first of these escapes we've seen.
