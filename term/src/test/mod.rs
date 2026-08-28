@@ -193,6 +193,13 @@ impl TestTerm {
 fn osc_color_overrides_preserve_explicit_presence_and_reset() {
     let mut term = TestTerm::new(2, 4, 8);
     term.print("\x1b]4;1;#cc5555\x1b\\");
+    assert_eq!(
+        term.color_overrides().colors[1],
+        Some(RgbColor::new_8bpc(0xcc, 0x55, 0x55).into())
+    );
+    term.print("\x1b]104;1\x1b\\");
+    assert_eq!(term.color_overrides().colors[1], None);
+    term.print("\x1b]4;1;#cc5555\x1b\\");
     term.print("\x1b]10;#b2b2b2\x1b\\");
     term.print("\x1b]11;#223344\x1b\\");
     term.print("\x1b]12;#654321\x1b\\");

@@ -2,7 +2,7 @@
 // and inclusive range
 #![allow(clippy::range_plus_one)]
 use super::*;
-use crate::color::{ColorPalette, RgbColor};
+use crate::color::{ColorOverrides, ColorPalette, RgbColor};
 use crate::config::{BidiMode, NewlineCanon};
 use log::debug;
 use num_traits::ToPrimitive;
@@ -357,6 +357,7 @@ pub struct TerminalState {
     progress: Progress,
 
     palette: Option<ColorPalette>,
+    color_overrides: ColorOverrides,
 
     pixel_width: usize,
     pixel_height: usize,
@@ -578,6 +579,7 @@ impl TerminalState {
             title: "wezterm".to_string(),
             icon_title: None,
             palette: None,
+            color_overrides: ColorOverrides::default(),
             pixel_height: size.pixel_height,
             pixel_width: size.pixel_width,
             dpi: size.dpi,
@@ -690,8 +692,8 @@ impl TerminalState {
             .unwrap_or_else(|| self.config.color_palette())
     }
 
-    pub fn color_overrides(&self) -> crate::color::ColorOverrides {
-        crate::color::ColorOverrides::default()
+    pub fn color_overrides(&self) -> &ColorOverrides {
+        &self.color_overrides
     }
 
     /// Called in response to dynamic color scheme escape sequences.

@@ -727,6 +727,7 @@ impl<'a> Performer<'a> {
                 self.newline_mode = false;
                 self.tabs = TabStop::new(self.screen().physical_cols, 8);
                 self.palette.take();
+                self.color_overrides = Default::default();
                 self.top_and_bottom_margins = 0..self.screen().physical_rows as VisibleRowIndex;
                 self.left_and_right_margins = 0..self.screen().physical_cols;
                 self.unicode_version = self.config.unicode_version();
@@ -974,6 +975,7 @@ impl<'a> Performer<'a> {
                         }
                         ColorOrQuery::Color(c) => {
                             self.palette_mut().colors.0[pair.palette_index as usize] = c;
+                            self.color_overrides.colors[pair.palette_index as usize] = Some(c);
                         }
                     }
                 }
@@ -986,16 +988,16 @@ impl<'a> Performer<'a> {
                 if colors.is_empty() {
                     // Reset all colors
                     self.palette.take();
+                    self.color_overrides.colors.fill(None);
                 } else {
                     // Reset individual colors
-                    if self.palette.is_none() {
-                        // Already at the defaults
-                    } else {
-                        let base = self.config.color_palette();
-                        for c in colors {
-                            let c = c as usize;
+                    let base = self.config.color_palette();
+                    for c in colors {
+                        let c = c as usize;
+                        if self.palette.is_some() {
                             self.palette_mut().colors.0[c] = base.colors.0[c];
                         }
+                        self.color_overrides.colors[c] = None;
                     }
                 }
                 self.implicit_palette_reset_if_same_as_configured();
@@ -1011,6 +1013,26 @@ impl<'a> Performer<'a> {
                     log::trace!("ChangeDynamicColors item: {:?}", which_color);
                     if let Some(which_color) = which_color {
                         macro_rules! set_or_query {
+                            ($name:ident, $override_name:ident) => {
+                                match color {
+                                    ColorOrQuery::Query => {
+                                        let response = OperatingSystemCommand::ChangeDynamicColors(
+                                            which_color,
+                                            vec![ColorOrQuery::Color(self.palette().$name.into())],
+                                        );
+                                        log::trace!("Color Query response {:?}", response);
+                                        write!(self.writer, "{}", response).ok();
+                                        self.writer.flush().ok();
+                                    }
+                                    ColorOrQuery::Color(c) => {
+                                        let value = c.into();
+                                        self.palette_mut().$name = value;
+                                        self.color_overrides.$override_name = Some(value);
+                                    }
+                                }
+                            };
+                        }
+                        macro_rules! set_or_query_untracked {
                             ($name:ident) => {
                                 match color {
                                     ColorOrQuery::Query => {
@@ -1027,8 +1049,12 @@ impl<'a> Performer<'a> {
                             };
                         }
                         match which_color {
-                            DynamicColorNumber::TextForegroundColor => set_or_query!(foreground),
-                            DynamicColorNumber::TextBackgroundColor => set_or_query!(background),
+                            DynamicColorNumber::TextForegroundColor => {
+                                set_or_query!(foreground, foreground)
+                            }
+                            DynamicColorNumber::TextBackgroundColor => {
+                                set_or_query!(background, background)
+                            }
                             DynamicColorNumber::TextCursorColor => {
                                 if let ColorOrQuery::Color(c) = color {
                                     // We set the border to the background color; we don't
@@ -1036,13 +1062,13 @@ impl<'a> Performer<'a> {
                                     // way just looks better.
                                     self.palette_mut().cursor_border = c.into();
                                 }
-                                set_or_query!(cursor_bg)
+                                set_or_query!(cursor_bg, cursor)
                             }
                             DynamicColorNumber::HighlightForegroundColor => {
-                                set_or_query!(selection_fg)
+                                set_or_query_untracked!(selection_fg)
                             }
                             DynamicColorNumber::HighlightBackgroundColor => {
-                                set_or_query!(selection_bg)
+                                set_or_query_untracked!(selection_bg)
                             }
                             DynamicColorNumber::MouseForegroundColor
                             | DynamicColorNumber::MouseBackgroundColor
@@ -1063,6 +1089,17 @@ impl<'a> Performer<'a> {
                 let which_color: Option<DynamicColorNumber> = FromPrimitive::from_u8(color as u8);
                 if let Some(which_color) = which_color {
                     macro_rules! reset {
+                        ($name:ident, $override_name:ident) => {{
+                            if self.palette.is_none() {
+                                // Already at the defaults
+                            } else {
+                                let base = self.config.color_palette();
+                                self.palette_mut().$name = base.$name;
+                            }
+                            self.color_overrides.$override_name = None;
+                        }};
+                    }
+                    macro_rules! reset_untracked {
                         ($name:ident) => {
                             if self.palette.is_none() {
                                 // Already at the defaults
@@ -1073,16 +1110,20 @@ impl<'a> Performer<'a> {
                         };
                     }
                     match which_color {
-                        DynamicColorNumber::TextForegroundColor => reset!(foreground),
-                        DynamicColorNumber::TextBackgroundColor => reset!(background),
+                        DynamicColorNumber::TextForegroundColor => reset!(foreground, foreground),
+                        DynamicColorNumber::TextBackgroundColor => reset!(background, background),
                         DynamicColorNumber::TextCursorColor => {
-                            reset!(cursor_bg);
+                            reset!(cursor_bg, cursor);
                             // Since we set the border to the bg, we consider it reset
-                            // by resetting the bg too!
-                            reset!(cursor_border);
+                            // by resetting the border too!
+                            reset_untracked!(cursor_border);
                         }
-                        DynamicColorNumber::HighlightForegroundColor => reset!(selection_fg),
-                        DynamicColorNumber::HighlightBackgroundColor => reset!(selection_bg),
+                        DynamicColorNumber::HighlightForegroundColor => {
+                            reset_untracked!(selection_fg)
+                        }
+                        DynamicColorNumber::HighlightBackgroundColor => {
+                            reset_untracked!(selection_bg)
+                        }
                         DynamicColorNumber::MouseForegroundColor
                         | DynamicColorNumber::MouseBackgroundColor
                         | DynamicColorNumber::TektronixForegroundColor
