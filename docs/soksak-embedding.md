@@ -10,8 +10,15 @@ its blink value. DECSET/DECRST 12 changes only the blink value of the current sh
 that engine state. Embeddings read `Terminal::cursor_pos().shape`; they do not parse the input stream
 again.
 
+The terminal model also owns explicit OSC 4/10/11/12 color override presence. `ColorOverrides`
+reports the raw indexed, foreground, background and cursor values separately from the effective
+`ColorPalette`. Setting a color equal to the configured base remains an explicit override. OSC
+reset and RIS clear the corresponding presence. Embeddings consume this state instead of
+comparing the effective palette with configured colors or parsing terminal input again.
+
 The owner test is:
 
 ```sh
 cargo test -p wezterm-term dec_mode_12_changes_cursor_blink_without_changing_shape
+cargo test -p wezterm-term osc_color_overrides_preserve_explicit_presence_and_reset
 ```
