@@ -1,5 +1,18 @@
 use super::*;
 
+#[test]
+fn dec_mode_12_changes_cursor_blink_without_changing_shape() {
+    let mut term = TestTerm::new(1, 1, 0);
+    term.print("\x1b[6 q");
+    self::assert_eq!(term.cursor_pos().shape, CursorShape::SteadyBar);
+
+    term.set_mode("?12", true);
+    self::assert_eq!(term.cursor_pos().shape, CursorShape::BlinkingBar);
+
+    term.set_mode("?12", false);
+    self::assert_eq!(term.cursor_pos().shape, CursorShape::SteadyBar);
+}
+
 /// In this issue, the `CSI 2 P` sequence incorrectly removed two
 /// cells from the line, leaving them effectively blank, when those
 /// two cells should have been erased to the current background
