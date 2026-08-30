@@ -236,8 +236,9 @@ impl TestTerm {
 
 #[test]
 fn dec9_and_dec1001_are_distinct_native_mouse_state() {
-    let mut term = TestTerm::new(2, 4, 8);
+    let (mut term, replies) = TestTerm::new_with_reply_capture(2, 4, 8);
     assert_eq!(term.mouse_tracking_modes(), MouseTrackingModes::default());
+    assert_eq!(term.is_mouse_grabbed(), false);
 
     term.print("\x1b[?9h");
     assert_eq!(term.mouse_tracking_modes().x10, true);
@@ -248,12 +249,20 @@ fn dec9_and_dec1001_are_distinct_native_mouse_state() {
     assert_eq!(term.mouse_tracking_modes().x10, true);
     assert_eq!(term.mouse_tracking_modes().normal, false);
     assert_eq!(term.mouse_tracking_modes().highlight, true);
+    assert_eq!(term.is_mouse_grabbed(), true);
+
+    term.print("\x1b[?9$p\x1b[?1001$p");
+    assert_eq!(&*replies.lock().unwrap(), b"\x1b[?9;1$y\x1b[?1001;1$y");
 
     term.print("\x1b[?9l");
     assert_eq!(term.mouse_tracking_modes().x10, false);
     assert_eq!(term.mouse_tracking_modes().highlight, true);
     term.print("\x1b[?1001l");
     assert_eq!(term.mouse_tracking_modes(), MouseTrackingModes::default());
+
+    term.print("\x1b[?9h\x1b[?1001h\x1bc");
+    assert_eq!(term.mouse_tracking_modes(), MouseTrackingModes::default());
+    assert_eq!(term.is_mouse_grabbed(), false);
 }
 
 #[test]

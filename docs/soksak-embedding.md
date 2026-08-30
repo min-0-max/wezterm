@@ -22,3 +22,16 @@ The owner test is:
 cargo test -p wezterm-term dec_mode_12_changes_cursor_blink_without_changing_shape
 cargo test -p wezterm-term osc_color_overrides_preserve_explicit_presence_and_reset
 ```
+
+DEC private mouse protocols are terminal-model state, not embedding-side parser aliases.
+`Terminal::mouse_tracking_modes()` exposes DEC9, DEC1000, DEC1001, DEC1002, and DEC1003 as
+distinct flags. DEC9 emits button presses without modifier bits; DEC1001 emits button press and
+release reports while leaving GUI highlighting outside the headless model. RIS clears both flags,
+and DECRQM reads the same native state.
+
+The focused owner tests are:
+
+```sh
+cargo test -p wezterm-escape-parser --features std parser::test::dec_private_modes
+cargo test -p wezterm-term dec9_and_dec1001
+```

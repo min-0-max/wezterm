@@ -903,6 +903,8 @@ pub enum DecPrivateModeCode {
     AutoWrap = 7,
     /// https://vt100.net/docs/vt510-rm/DECARM.html
     AutoRepeat = 8,
+    /// X10 compatibility mouse tracking. Reports button presses only.
+    X10MouseTracking = 9,
     StartBlinkingCursor = 12,
     ShowCursor = 25,
 

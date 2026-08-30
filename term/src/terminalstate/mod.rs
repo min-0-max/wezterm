@@ -81,6 +81,39 @@ pub(crate) enum MouseEncoding {
     SgrPixels,
 }
 
+/// The terminal model's native DEC mouse-protocol state.
+///
+/// These flags remain distinct because each DECSET/DECRST mode has different
+/// phase rules. Coordinate encodings such as UTF-8, SGR and SGR-Pixels are
+/// separate state and do not enable a protocol by themselves.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct MouseTrackingModes {
+    /// DEC private mode 9: button presses only, without modifier bits.
+    pub x10: bool,
+    /// DEC private mode 1000: normal button press/release tracking.
+    pub normal: bool,
+    /// DEC private mode 1001: highlight button press/release tracking.
+    pub highlight: bool,
+    /// DEC private mode 1002: button-event motion tracking.
+    pub button_event: bool,
+    /// DEC private mode 1003: any-event motion tracking.
+    pub any_event: bool,
+}
+
+impl MouseTrackingModes {
+    pub fn is_active(self) -> bool {
+        self.x10 || self.normal || self.highlight || self.button_event || self.any_event
+    }
+
+    pub(crate) fn reports_release(self) -> bool {
+        self.normal || self.highlight || self.button_event || self.any_event
+    }
+
+    pub(crate) fn reports_modifiers(self) -> bool {
+        self.normal || self.highlight || self.button_event || self.any_event
+    }
+}
+
 impl TabStop {
     fn new(screen_width: usize, tab_width: usize) -> Self {
         let mut tabs = Vec::with_capacity(screen_width);
@@ -333,7 +366,9 @@ pub struct TerminalState {
     /// X10 (legacy), SGR, and SGR-Pixels style mouse tracking and
     /// reporting is enabled
     mouse_encoding: MouseEncoding,
+    x10_mouse_tracking: bool,
     mouse_tracking: bool,
+    highlight_mouse_tracking: bool,
     /// Button events enabled
     button_event_mouse: bool,
     current_mouse_buttons: Vec<MouseButton>,
@@ -563,6 +598,8 @@ impl TerminalState {
             bracketed_paste: false,
             focus_tracking: false,
             mouse_encoding: MouseEncoding::X10,
+            x10_mouse_tracking: false,
+            highlight_mouse_tracking: false,
             keyboard_encoding: KeyboardEncoding::Xterm,
             sixel_scrolls_right: false,
             any_event_mouse: false,
@@ -778,7 +815,18 @@ impl TerminalState {
     /// This is useful for the hosting GUI application to decide how best
     /// to dispatch mouse events to the terminal.
     pub fn is_mouse_grabbed(&self) -> bool {
-        self.mouse_tracking || self.button_event_mouse || self.any_event_mouse
+        self.mouse_tracking_modes().is_active()
+    }
+
+    /// Returns the distinct mouse protocol flags owned by the terminal model.
+    pub fn mouse_tracking_modes(&self) -> MouseTrackingModes {
+        MouseTrackingModes {
+            x10: self.x10_mouse_tracking,
+            normal: self.mouse_tracking,
+            highlight: self.highlight_mouse_tracking,
+            button_event: self.button_event_mouse,
+            any_event: self.any_event_mouse,
+        }
     }
 
     pub fn is_alt_screen_active(&self) -> bool {
@@ -1789,6 +1837,22 @@ impl TerminalState {
                 self.cursor_visible = false;
             }
 
+            Mode::SetDecPrivateMode(DecPrivateMode::Code(DecPrivateModeCode::X10MouseTracking)) => {
+                self.x10_mouse_tracking = true;
+                self.last_mouse_move.take();
+            }
+            Mode::ResetDecPrivateMode(DecPrivateMode::Code(
+                DecPrivateModeCode::X10MouseTracking,
+            )) => {
+                self.x10_mouse_tracking = false;
+                self.last_mouse_move.take();
+            }
+            Mode::QueryDecPrivateMode(DecPrivateMode::Code(
+                DecPrivateModeCode::X10MouseTracking,
+            )) => {
+                self.decqrm_response(mode, true, self.x10_mouse_tracking);
+            }
+
             Mode::SetDecPrivateMode(DecPrivateMode::Code(DecPrivateModeCode::MouseTracking)) => {
                 self.mouse_tracking = true;
                 self.last_mouse_move.take();
@@ -1803,10 +1867,21 @@ impl TerminalState {
 
             Mode::SetDecPrivateMode(DecPrivateMode::Code(
                 DecPrivateModeCode::HighlightMouseTracking,
-            ))
-            | Mode::ResetDecPrivateMode(DecPrivateMode::Code(
+            )) => {
+                self.highlight_mouse_tracking = true;
+                self.last_mouse_move.take();
+            }
+            Mode::ResetDecPrivateMode(DecPrivateMode::Code(
                 DecPrivateModeCode::HighlightMouseTracking,
-            )) => {}
+            )) => {
+                self.highlight_mouse_tracking = false;
+                self.last_mouse_move.take();
+            }
+            Mode::QueryDecPrivateMode(DecPrivateMode::Code(
+                DecPrivateModeCode::HighlightMouseTracking,
+            )) => {
+                self.decqrm_response(mode, true, self.highlight_mouse_tracking);
+            }
 
             Mode::SetDecPrivateMode(DecPrivateMode::Code(DecPrivateModeCode::ButtonEventMouse)) => {
                 self.button_event_mouse = true;

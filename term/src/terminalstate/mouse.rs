@@ -60,14 +60,16 @@ impl TerminalState {
             MouseButton::WheelRight(_) => 67,
         };
 
-        if event.modifiers.contains(KeyModifiers::SHIFT) {
-            code += 4;
-        }
-        if event.modifiers.contains(KeyModifiers::ALT) {
-            code += 8;
-        }
-        if event.modifiers.contains(KeyModifiers::CTRL) {
-            code += 16;
+        if self.mouse_tracking_modes().reports_modifiers() {
+            if event.modifiers.contains(KeyModifiers::SHIFT) {
+                code += 4;
+            }
+            if event.modifiers.contains(KeyModifiers::ALT) {
+                code += 8;
+            }
+            if event.modifiers.contains(KeyModifiers::CTRL) {
+                code += 16;
+            }
         }
 
         (code, button)
@@ -76,9 +78,7 @@ impl TerminalState {
     fn mouse_wheel(&mut self, event: MouseEvent) -> anyhow::Result<()> {
         let (button, _button) = self.mouse_report_button_number(&event);
 
-        if self.mouse_encoding == MouseEncoding::SGR
-            && (self.mouse_tracking || self.button_event_mouse || self.any_event_mouse)
-        {
+        if self.mouse_encoding == MouseEncoding::SGR && self.mouse_tracking_modes().is_active() {
             log::trace!(
                 "wheel {event:?} ESC [<{};{};{}M",
                 button,
@@ -94,7 +94,7 @@ impl TerminalState {
             )?;
             self.writer.flush()?;
         } else if self.mouse_encoding == MouseEncoding::SgrPixels
-            && (self.mouse_tracking || self.button_event_mouse || self.any_event_mouse)
+            && self.mouse_tracking_modes().is_active()
         {
             let height = self.screen.physical_rows as usize;
             let width = self.screen.physical_cols as usize;
@@ -116,7 +116,7 @@ impl TerminalState {
                     + 1
             )?;
             self.writer.flush()?;
-        } else if self.mouse_tracking || self.button_event_mouse || self.any_event_mouse {
+        } else if self.mouse_tracking_modes().is_active() {
             self.encode_x10_or_utf8(event, button)?;
         } else if self.screen.is_alt_screen_active() {
             // Send cursor keys instead (equivalent to xterm's alternateScroll mode)
@@ -141,7 +141,7 @@ impl TerminalState {
         self.current_mouse_buttons.retain(|&b| b != event_button);
         self.current_mouse_buttons.push(event_button);
 
-        if !(self.mouse_tracking || self.button_event_mouse || self.any_event_mouse) {
+        if !self.mouse_tracking_modes().is_active() {
             return Ok(());
         }
 
@@ -192,7 +192,7 @@ impl TerminalState {
         let (release_button, button) = self.mouse_report_button_number(&event);
         if !self.current_mouse_buttons.is_empty() {
             self.current_mouse_buttons.retain(|&b| b != button);
-            if self.mouse_tracking || self.button_event_mouse || self.any_event_mouse {
+            if self.mouse_tracking_modes().reports_release() {
                 if self.mouse_encoding == MouseEncoding::SGR {
                     log::trace!(
                         "release {event:?} ESC [<{};{};{}m",
@@ -234,7 +234,7 @@ impl TerminalState {
                     )?;
                     self.writer.flush()?;
                 } else {
-                    let release_button = 3;
+                    let release_button = (release_button & !0b11) | 3;
                     self.encode_x10_or_utf8(event, release_button)?;
                 }
             }
