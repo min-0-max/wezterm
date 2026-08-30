@@ -826,10 +826,13 @@ mod test {
     #[test]
     fn dec_private_modes() {
         assert_eq!(
-            parse_as("\x1b[?1;1006h", "\x1b[?1h\x1b[?1006h"),
+            parse_as("\x1b[?1;9;1006h", "\x1b[?1h\x1b[?9h\x1b[?1006h"),
             vec![
                 Action::CSI(CSI::Mode(Mode::SetDecPrivateMode(DecPrivateMode::Code(
                     DecPrivateModeCode::ApplicationCursorKeys
+                ),))),
+                Action::CSI(CSI::Mode(Mode::SetDecPrivateMode(DecPrivateMode::Code(
+                    DecPrivateModeCode::X10MouseTracking
                 ),))),
                 Action::CSI(CSI::Mode(Mode::SetDecPrivateMode(DecPrivateMode::Code(
                     DecPrivateModeCode::SGRMouse

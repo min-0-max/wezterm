@@ -10,6 +10,7 @@ mod image;
 // mod selection; FIXME: port to render layer
 use crate::color::{ColorPalette, RgbColor};
 use k9::assert_equal as assert_eq;
+use std::io::Write;
 use std::sync::{Arc, Mutex};
 use wezterm_escape_parser::csi::{Edit, EraseInDisplay, EraseInLine};
 use wezterm_escape_parser::{OneBased, OperatingSystemCommand, CSI};
@@ -59,6 +60,24 @@ impl TerminalConfiguration for TestTermConfig {
     fn enable_kitty_graphics(&self) -> bool {
         true
     }
+
+    fn threaded_writer(&self) -> bool {
+        false
+    }
+}
+
+#[derive(Clone, Debug)]
+struct ReplyCapture(Arc<Mutex<Vec<u8>>>);
+
+impl Write for ReplyCapture {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 impl TestTerm {
@@ -89,6 +108,32 @@ impl TestTerm {
         term.set_auto_wrap(true);
 
         term
+    }
+
+    fn new_with_reply_capture(
+        height: usize,
+        width: usize,
+        scrollback: usize,
+    ) -> (Self, Arc<Mutex<Vec<u8>>>) {
+        let replies = Arc::new(Mutex::new(Vec::new()));
+        let mut terminal = Terminal::new(
+            TerminalSize {
+                rows: height,
+                cols: width,
+                pixel_width: width * 8,
+                pixel_height: height * 16,
+                dpi: 0,
+            },
+            Arc::new(TestTermConfig { scrollback }),
+            "WezTerm",
+            "O_o",
+            Box::new(ReplyCapture(replies.clone())),
+        );
+        let clip: Arc<dyn Clipboard> = Arc::new(LocalClip::new());
+        terminal.set_clipboard(&clip);
+        let mut term = Self { term: terminal };
+        term.set_auto_wrap(true);
+        (term, replies)
     }
 
     fn print<B: AsRef<[u8]>>(&mut self, bytes: B) {
@@ -187,6 +232,58 @@ impl TestTerm {
             reason, seqno, seqs
         );
     }
+}
+
+#[test]
+fn dec9_and_dec1001_are_distinct_native_mouse_state() {
+    let mut term = TestTerm::new(2, 4, 8);
+    assert_eq!(term.mouse_tracking_modes(), MouseTrackingModes::default());
+
+    term.print("\x1b[?9h");
+    assert_eq!(term.mouse_tracking_modes().x10, true);
+    assert_eq!(term.mouse_tracking_modes().normal, false);
+    assert_eq!(term.mouse_tracking_modes().highlight, false);
+
+    term.print("\x1b[?1001h");
+    assert_eq!(term.mouse_tracking_modes().x10, true);
+    assert_eq!(term.mouse_tracking_modes().normal, false);
+    assert_eq!(term.mouse_tracking_modes().highlight, true);
+
+    term.print("\x1b[?9l");
+    assert_eq!(term.mouse_tracking_modes().x10, false);
+    assert_eq!(term.mouse_tracking_modes().highlight, true);
+    term.print("\x1b[?1001l");
+    assert_eq!(term.mouse_tracking_modes(), MouseTrackingModes::default());
+}
+
+#[test]
+fn dec9_and_dec1001_native_encoder_preserves_distinct_phase_rules() {
+    let (mut term, replies) = TestTerm::new_with_reply_capture(4, 8, 0);
+    let pointer = |kind, modifiers| MouseEvent {
+        kind,
+        x: 1,
+        y: 2,
+        x_pixel_offset: 0,
+        y_pixel_offset: 0,
+        button: MouseButton::Left,
+        modifiers,
+    };
+    let all_modifiers = KeyModifiers::SHIFT | KeyModifiers::ALT | KeyModifiers::CTRL;
+
+    term.print("\x1b[?9h");
+    term.mouse_event(pointer(MouseEventKind::Press, all_modifiers))
+        .unwrap();
+    term.mouse_event(pointer(MouseEventKind::Release, all_modifiers))
+        .unwrap();
+    assert_eq!(&*replies.lock().unwrap(), b"\x1b[M \"#");
+
+    replies.lock().unwrap().clear();
+    term.print("\x1b[?9l\x1b[?1001h");
+    term.mouse_event(pointer(MouseEventKind::Press, all_modifiers))
+        .unwrap();
+    term.mouse_event(pointer(MouseEventKind::Release, all_modifiers))
+        .unwrap();
+    assert_eq!(&*replies.lock().unwrap(), b"\x1b[M<\"#\x1b[M?\"#");
 }
 
 #[test]
